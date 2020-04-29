@@ -47,8 +47,8 @@ def check_update(user_id):
     query = session.query(User)
     f = (User.user_id == user_id)
     for user in query.filter(f).all():
-        past_days = (datetime.datetime.now().timestamp() -
-                     user.last_update) // 86400
+        past_days = (datetime.datetime.now().timestamp()
+                     - user.last_update) // 86400
     new_prompts = past_days * 5
     if past_days > 0:
         user.last_update = user.last_update + past_days * 86400

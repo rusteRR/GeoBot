@@ -1,9 +1,10 @@
 import vk_api
 import requests
 import os
+from wiki import get_summary
 from make_board import create_board
 import json
-from database import check_id, add_users, use_prompt
+from database import check_id, add_users, use_prompt, check_update
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import random
 from io import BytesIO
@@ -64,80 +65,87 @@ def photo(peer_id, user_id):
     os.remove('result.jpg')
 
 
+def send_message(us_id, msg, keyboard):
+    vk.messages.send(user_id=us_id, message=msg,
+                     random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard))
+
+
 def main():
     global COUNTER, CORRECT
     TOWN = False
     RIVER = False
+    WIKI = False
     LEVEL = '-'
     ANSWER = 15
     for event in longpoll.listen():
         if event.type == VkBotEventType.MESSAGE_NEW:
-            response = vk.users.get(user_ids=event.obj.message['from_id'],
-                                    fields='city')
+            response = vk.users.get(user_ids=event.obj.message['from_id'])
             text = event.obj.message['text'].lower()
+            user_id = event.obj.message['from_id']
 
             '''Проверка регистрации пользователя, в случае, если id пользователя
             отсутствует в базе данных - в БД добаляется id, имя, количество подсказок и время последнего обновления'''
 
-            if check_register(event.obj.message['from_id']):
+            if check_register(user_id):
                 pass
             else:
                 nickname = response[0]['first_name'] + ' ' + \
                     response[0]['last_name'][0] + '.'
                 time = datetime.datetime.now().timestamp()
-                add_users(event.obj.message['from_id'], nickname, 5, int(time))
-                vk.messages.send(user_id=event.obj.message['from_id'],
-                                 message='Вы успешно зарегистрированы!',
-                                 random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_main_menu))
+                add_users(user_id, nickname, 5, int(time))
+                send_message(
+                    user_id, 'Вы успешно зарегистрированы!', keyboard_main_menu)
 
             '''Обработка запросов пользователя'''
 
-            if text.split()[0] == 'отменить':
+            if text.rsplit(maxsplit=1)[0] == 'выйти в меню':
                 LEVEL = '-'
                 TOWN = False
                 RIVER = False
                 COUNTER = 0
                 CORRECT = 0
+                WIKI = False
                 used_cities.clear()
-                vk.messages.send(user_id=event.obj.message['from_id'],
-                                 message='Вы успешно вышли из игры!',
-                                 random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_main_menu))
+                send_message(
+                    user_id, 'Вы успешно вышли из игры!', keyboard_main_menu)
             elif text == 'города':
-                vk.messages.send(user_id=event.obj.message['from_id'],
-                                 message='Выберите сложность: ',
-                                 random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_level))
+                send_message(user_id, 'Выберите сложность: ', keyboard_level)
                 TOWN = True
+            elif text == 'википедия':
+                WIKI = True
+                msg = 'Введите объект и мы расскажем Вам о нём! '
+                send_message(user_id, msg, keyboard_wiki)
+            elif WIKI:
+                msg = get_summary(text)
+                if msg:
+                    send_message(user_id, msg, keyboard_wiki)
+                else:
+                    msg = 'Кажется, мы всё же знаем не обо всём...'
+                    send_message(user_id, msg, keyboard_wiki)
             elif TOWN and LEVEL == '-':
                 LEVEL = text
-                photo(event.object.peer_id, event.obj.message['from_id'])
+                photo(event.object.peer_id, user_id)
             elif text.split()[0] == 'подсказка':
-                print(used_cities[-1][0])
                 length = len(used_cities[-1][0])
                 string = length * '_ '
-                ok = use_prompt(event.obj.message['from_id'])
+                check_update(user_id)
+                ok = use_prompt(user_id)
                 if ok == -1:
                     messag = 'У вас больше нет подсказок'
-                    vk.messages.send(user_id=event.obj.message['from_id'],
-                                     message=messag,
-                                     random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_in_game))
+                    send_message(user_id, messag, keyboard_in_game)
                 else:
                     messag = f'У вас осталось {ok} подсказок'
-                    vk.messages.send(user_id=event.obj.message['from_id'],
-                                     message=f'Подсказка &#128161;: {string}\n{messag}',
-                                     random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_in_game))
+                    send_message(user_id, f'Подсказка &#128161;: {string}\n{messag}',
+                                 keyboard_in_game)
             elif text == 'пропустить':
-                photo(event.object.peer_id, event.obj.message['from_id'])
+                photo(event.object.peer_id, user_id)
             elif TOWN and (LEVEL == 'лёгкий' or LEVEL == 'сложный'):
                 if text == used_cities[-1][0].lower():
-                    vk.messages.send(user_id=event.obj.message['from_id'],
-                                     message=f'Верно!',
-                                     random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_in_game))
+                    send_message(user_id, f'Верно!', keyboard_in_game)
                     CORRECT = CORRECT + 1
-                    photo(event.object.peer_id, event.obj.message['from_id'])
+                    photo(event.object.peer_id, user_id)
                 else:
-                    vk.messages.send(user_id=event.obj.message['from_id'],
-                                     message=f'Неправильно! Вы можете воспользоваться подсказкой или пропустить вопрос.',
-                                     random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard_in_game))
+                    send_message(user_id, f'Неправильно! Вы можете воспользоваться подсказкой или пропустить вопрос.', keyboard_in_game)
 
 
 '''
@@ -152,7 +160,7 @@ keyboard_level = {
                 "payload": "{\"button\": \"1\"}",
                 "label": "Лёгкий"
             },
-            "color": "positive"
+            "color": "primary"
         },
             {
             "action": {
@@ -160,7 +168,7 @@ keyboard_level = {
                 "payload": "{\"button\": \"2\"}",
                 "label": "Сложный"
             },
-            "color": "negative"
+            "color": "primary"
         }
         ]
     ]
@@ -193,7 +201,7 @@ keyboard_in_game = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
-                "label": "Отменить &#9940;"
+                "label": "Выйти в меню &#9940;"
             },
             "color": "primary"
         }
@@ -226,6 +234,39 @@ keyboard_main_menu = {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
                 "label": "Режимы"
+            },
+            "color": "primary"
+        }
+        ],
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"4\"}",
+                "label": "Топ игроков"
+            },
+            "color": "primary"
+        }
+        ]
+    ]
+}
+
+
+keyboard_wiki = {
+    "one_time": False,
+    "buttons": [
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"1\"}",
+                "label": "Подробнее &#128161;"
+            },
+            "color": "primary"
+        },
+            {
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"3\"}",
+                "label": "Выйти в меню &#9940;"
             },
             "color": "primary"
         }
