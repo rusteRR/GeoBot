@@ -12,6 +12,8 @@ def add_users(user_id, nickname, prompt, last_update):
     user.nickname = nickname
     user.prompt = prompt
     user.last_update = last_update
+    user.cor_answ = 0
+    user.all_questions = 0
     session = db_session.create_session()
     session.add(user)
     session.commit()
@@ -47,8 +49,8 @@ def check_update(user_id):
     query = session.query(User)
     f = (User.user_id == user_id)
     for user in query.filter(f).all():
-        past_days = (datetime.datetime.now().timestamp()
-                     - user.last_update) // 86400
+        past_days = (datetime.datetime.now().timestamp() -
+                     user.last_update) // 86400
     new_prompts = past_days * 5
     if past_days > 0:
         user.last_update = user.last_update + past_days * 86400
@@ -57,3 +59,33 @@ def check_update(user_id):
         else:
             user.prompt = user.prompt + new_prompts
     session.commit()
+
+
+def add_answers(user_id, answers):
+    session = db_session.create_session()
+    query = session.query(User)
+    f = (User.user_id == user_id)
+    for user in query.filter(f).all():
+        user.cor_answ = user.cor_answ + answers
+    session.commit()
+
+
+def add_questions(user_id):
+    session = db_session.create_session()
+    query = session.query(User)
+    f = (User.user_id == user_id)
+    for user in query.filter(f).all():
+        user.all_questions = user.all_questions + 1
+    session.commit()
+
+
+def get_best_players():
+    best = []
+    session = db_session.create_session()
+    query = session.query(User)
+    f = (User.all_questions > 0)
+    for user in query.filter(f).all():
+        best.append((
+            int((user.cor_answ / user.all_questions) * 100), user.nickname))
+    best.sort()
+    return best[:10]

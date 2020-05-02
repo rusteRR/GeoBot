@@ -11,3 +11,5 @@ class User(SqlAlchemyBase):
         sqlalchemy.String, nullable=False, unique=True)
     prompt = sqlalchemy.Column(sqlalchemy.Integer, nullable=False)
     last_update = sqlalchemy.Column(sqlalchemy.Integer, nullable=False)
+    cor_answ = sqlalchemy.Column(sqlalchemy.Integer, nullable=False)
+    all_questions = sqlalchemy.Column(sqlalchemy.Integer, nullable=False)

@@ -4,7 +4,7 @@ import os
 from wiki import get_summary
 from make_board import create_board
 import json
-from database import check_id, add_users, use_prompt, check_update
+from database import check_id, add_users, use_prompt, check_update, get_best_players, add_answers, add_questions
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import random
 from io import BytesIO
@@ -17,8 +17,15 @@ vk_session = vk_api.VkApi(
 longpoll = VkBotLongPoll(vk_session, 194275944)
 vk = vk_session.get_api()
 
-COUNTER = 0
-CORRECT = 0
+COUNTER = 0  # Счётчик номера вопроса
+CORRECT = 0  # Счётчик правильных ответов в игре
+
+EM_NUMBERS = {1: '1&#8419;', 2: '2&#8419;', 3: '3&#8419;', 4: '4&#8419;', 5: '5&#8419;',
+              6: '6&#8419;', 7: '7&#8419;', 8: '8&#8419;', 9: '9&#8419;', 10: '&#128287;'}
+
+
+'''Функция возваращет изображение bytes-like объекта, вызывается в функции photo для отправки
+изображения пользователю'''
 
 
 def get_image():
@@ -33,6 +40,10 @@ def get_image():
     return n.draw_map(city)
 
 
+'''Функция проверяет, есть ли данный пользователь в базе данных, возваращет 
+False, если пользователь не зарегистрирован, True, если пользователь есть в ьазе данных'''
+
+
 def check_register(user_id):
     result = check_id(user_id)
     print(result)
@@ -41,6 +52,9 @@ def check_register(user_id):
     else:
         res = False
     return res
+
+
+'''Отправка спутникового изображения пользователю'''
 
 
 def photo(peer_id, user_id):
@@ -62,6 +76,7 @@ def photo(peer_id, user_id):
     res_photo = "photo{}_{}".format(c["owner_id"], c["id"])
     vk.messages.send(user_ids=user_id, peer_id=peer_id, message=f'Вопрос №{COUNTER} из {15}',
                      attachment=res_photo, random_id=0, keyboard=json.dumps(keyboard_in_game))
+    add_questions(user_id)
     os.remove('result.jpg')
 
 
@@ -86,9 +101,7 @@ def main():
             '''Проверка регистрации пользователя, в случае, если id пользователя
             отсутствует в базе данных - в БД добаляется id, имя, количество подсказок и время последнего обновления'''
 
-            if check_register(user_id):
-                pass
-            else:
+            if not check_register(user_id):
                 nickname = response[0]['first_name'] + ' ' + \
                     response[0]['last_name'][0] + '.'
                 time = datetime.datetime.now().timestamp()
@@ -107,7 +120,13 @@ def main():
                 WIKI = False
                 used_cities.clear()
                 send_message(
-                    user_id, 'Вы успешно вышли из игры!', keyboard_main_menu)
+                    user_id, 'Вы успешно вышли в главное меню!', keyboard_main_menu)
+            elif TOWN and LEVEL == '-':
+                if text == 'лёгкий' or text == 'ложный':
+                    LEVEL = text
+                    photo(event.object.peer_id, user_id)
+                else:
+                    send_message(user_id, 'Некорректный ввод!', keyboard_level)
             elif text == 'города':
                 send_message(user_id, 'Выберите сложность: ', keyboard_level)
                 TOWN = True
@@ -115,16 +134,19 @@ def main():
                 WIKI = True
                 msg = 'Введите объект и мы расскажем Вам о нём! '
                 send_message(user_id, msg, keyboard_wiki)
+            elif text == 'топ игроков':
+                best = get_best_players()
+                msg = ''
+                i = 0
+                for i in range(1, len(best) + 1):
+                    msg = msg + f'{EM_NUMBERS[i]} {best[i-1][1]} | Процент правильных ответов: {best[i-1][0]}%\n'
+                if i < 10:
+                    for j in range(i + 1, 11):
+                        msg = msg + f'{EM_NUMBERS[j]} ...\n'
+                send_message(user_id, msg, keyboard_main_menu)
             elif WIKI:
                 msg = get_summary(text)
-                if msg:
-                    send_message(user_id, msg, keyboard_wiki)
-                else:
-                    msg = 'Кажется, мы всё же знаем не обо всём...'
-                    send_message(user_id, msg, keyboard_wiki)
-            elif TOWN and LEVEL == '-':
-                LEVEL = text
-                photo(event.object.peer_id, user_id)
+                send_message(user_id, msg, keyboard_wiki)
             elif text.split()[0] == 'подсказка':
                 length = len(used_cities[-1][0])
                 string = length * '_ '
@@ -141,8 +163,9 @@ def main():
                 photo(event.object.peer_id, user_id)
             elif TOWN and (LEVEL == 'лёгкий' or LEVEL == 'сложный'):
                 if text == used_cities[-1][0].lower():
-                    send_message(user_id, f'Верно!', keyboard_in_game)
+                    send_message(user_id, f'Верно &#9989;', keyboard_in_game)
                     CORRECT = CORRECT + 1
+                    add_answers(user_id, 1)
                     photo(event.object.peer_id, user_id)
                 else:
                     send_message(user_id, f'Неправильно! Вы можете воспользоваться подсказкой или пропустить вопрос.', keyboard_in_game)
@@ -167,6 +190,15 @@ keyboard_level = {
                 "type": "text",
                 "payload": "{\"button\": \"2\"}",
                 "label": "Сложный"
+            },
+            "color": "primary"
+        }
+        ],
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"4\"}",
+                "label": "Выйти в меню &#128682;"
             },
             "color": "primary"
         }
@@ -201,7 +233,7 @@ keyboard_in_game = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
-                "label": "Выйти в меню &#9940;"
+                "label": "Выйти в меню &#128682;"
             },
             "color": "primary"
         }
@@ -266,7 +298,7 @@ keyboard_wiki = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
-                "label": "Выйти в меню &#9940;"
+                "label": "Выйти в меню &#128682;"
             },
             "color": "primary"
         }
