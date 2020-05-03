@@ -11,6 +11,10 @@ from io import BytesIO
 from screenshot import Map
 from PIL import Image
 import datetime
+from data import db_session
+
+
+db_session.global_init("users.sqlite")
 
 vk_session = vk_api.VkApi(
     token=TOKEN)
@@ -19,6 +23,8 @@ vk = vk_session.get_api()
 
 COUNTER = 0  # Счётчик номера вопроса
 CORRECT = 0  # Счётчик правильных ответов в игре
+WRONG = 0  # Счётчик неверных ответов в игре
+LEVEL = '-'
 
 EM_NUMBERS = {1: '1&#8419;', 2: '2&#8419;', 3: '3&#8419;', 4: '4&#8419;', 5: '5&#8419;',
               6: '6&#8419;', 7: '7&#8419;', 8: '8&#8419;', 9: '9&#8419;', 10: '&#128287;'}
@@ -28,9 +34,13 @@ EM_NUMBERS = {1: '1&#8419;', 2: '2&#8419;', 3: '3&#8419;', 4: '4&#8419;', 5: '5&
 изображения пользователю'''
 
 
-def get_image():
+def get_image(level):
     with open('cities.txt') as fi:
-        cities = fi.read().split('\n')
+        cities = fi.read().split('.')
+    if LEVEL == 'лёгкий':
+        cities = cities[0]
+    else:
+        cities = cities[1]
     city = random.sample(cities, 1)
     while city in used_cities:
         city = random.sample(cities, 1)
@@ -58,14 +68,17 @@ def check_register(user_id):
 
 
 def photo(peer_id, user_id):
-    global COUNTER, CORRECT
+    global COUNTER, CORRECT, WRONG, LEVEL
     COUNTER += 1
     if COUNTER > 15:
         text = f'Правильных ответов: {CORRECT} из 15'
         vk.messages.send(user_ids=user_id, message=text,
                          random_id=0, keyboard=json.dumps(keyboard_in_game))
         return
-    photo = get_image()
+    if COUNTER > 1:
+        msg = f'Правильных ответов &#9989;: {CORRECT}\nНеправильных ответов &#10060;: {WRONG}'
+        send_message(user_id, msg, keyboard_in_game)
+    photo = get_image(LEVEL)
     res = vk.photos.getMessagesUploadServer()
     Image.open(photo).save('result.jpg')
     create_board('result.jpg')
@@ -86,12 +99,13 @@ def send_message(us_id, msg, keyboard):
 
 
 def main():
-    global COUNTER, CORRECT
+    global COUNTER, CORRECT, WRONG, LEVEL
     TOWN = False
     RIVER = False
     WIKI = False
-    LEVEL = '-'
     ANSWER = 15
+    WRONG = 0
+    CURRENT_PROMPT = 0
     for event in longpoll.listen():
         if event.type == VkBotEventType.MESSAGE_NEW:
             response = vk.users.get(user_ids=event.obj.message['from_id'])
@@ -105,7 +119,7 @@ def main():
                 nickname = response[0]['first_name'] + ' ' + \
                     response[0]['last_name'][0] + '.'
                 time = datetime.datetime.now().timestamp()
-                add_users(user_id, nickname, 5, int(time))
+                add_users(user_id, nickname, 100, int(time))
                 send_message(
                     user_id, 'Вы успешно зарегистрированы!', keyboard_main_menu)
 
@@ -118,22 +132,28 @@ def main():
                 COUNTER = 0
                 CORRECT = 0
                 WIKI = False
+                WRONG = 0
+                CURRENT_PROMPT = 0
                 used_cities.clear()
                 send_message(
                     user_id, 'Вы успешно вышли в главное меню!', keyboard_main_menu)
+
             elif TOWN and LEVEL == '-':
                 if text == 'лёгкий' or text == 'ложный':
                     LEVEL = text
                     photo(event.object.peer_id, user_id)
                 else:
                     send_message(user_id, 'Некорректный ввод!', keyboard_level)
+
             elif text == 'города':
                 send_message(user_id, 'Выберите сложность: ', keyboard_level)
                 TOWN = True
+
             elif text == 'википедия':
                 WIKI = True
                 msg = 'Введите объект и мы расскажем Вам о нём! '
                 send_message(user_id, msg, keyboard_wiki)
+
             elif text == 'топ игроков':
                 best = get_best_players()
                 msg = ''
@@ -144,31 +164,61 @@ def main():
                     for j in range(i + 1, 11):
                         msg = msg + f'{EM_NUMBERS[j]} ...\n'
                 send_message(user_id, msg, keyboard_main_menu)
+
             elif WIKI:
                 msg = get_summary(text)
                 send_message(user_id, msg, keyboard_wiki)
+
             elif text.split()[0] == 'подсказка':
                 length = len(used_cities[-1][0])
-                string = length * '_ '
                 check_update(user_id)
-                ok = use_prompt(user_id)
-                if ok == -1:
-                    messag = 'У вас больше нет подсказок'
-                    send_message(user_id, messag, keyboard_in_game)
+                possible = len(used_cities[-1][0].replace('-', '')) // 3
+                if CURRENT_PROMPT + 1 <= possible:
+                    ok = use_prompt(user_id)
+                    if ok == -1:
+                        messag = '&#9940; У вас больше нет подсказок'
+                        send_message(user_id, messag, keyboard_in_game)
+                    else:
+                        messag = f'&#9888; У вас осталось {ok} подсказок'
+                        if CURRENT_PROMPT + 1 <= possible:
+                            CURRENT_PROMPT += 1
+                        msg = f'&#10004; Использована {CURRENT_PROMPT} подсказка из {possible}'
+                        prompt = []
+                        for i in range(length):
+                            if i <= CURRENT_PROMPT - 2:
+                                prompt.append(
+                                    used_cities[-1][0][i].upper() + ' ')
+                            elif used_cities[-1][0][i] == '-':
+                                prompt.append(' - ')
+                            elif used_cities[-1][0][i] == ' ':
+                                prompt.append('    ')
+                            else:
+                                prompt.append('&#10134;')
+                        prompt = ''.join(prompt)
+                        send_message(user_id, f'{msg}\n&#128161; Подсказка: {prompt}\n{messag}',
+                                     keyboard_in_game)
                 else:
-                    messag = f'У вас осталось {ok} подсказок'
-                    send_message(user_id, f'Подсказка &#128161;: {string}\n{messag}',
+                    prompt = '&#8252; У вас больше нет подсказок для этого вопроса'
+                    send_message(user_id, f'{msg}\n{prompt}\n{messag}',
                                  keyboard_in_game)
+
             elif text == 'пропустить':
+                WRONG += 1
+                CURRENT_PROMPT = 0
                 photo(event.object.peer_id, user_id)
+
             elif TOWN and (LEVEL == 'лёгкий' or LEVEL == 'сложный'):
                 if text == used_cities[-1][0].lower():
                     send_message(user_id, f'Верно &#9989;', keyboard_in_game)
                     CORRECT = CORRECT + 1
+                    CURRENT_PROMPT = 0
                     add_answers(user_id, 1)
                     photo(event.object.peer_id, user_id)
                 else:
-                    send_message(user_id, f'Неправильно! Вы можете воспользоваться подсказкой или пропустить вопрос.', keyboard_in_game)
+                    WRONG += 1
+                    CURRENT_PROMPT = 0
+                    send_message(user_id, f'Неправильно :(', keyboard_in_game)
+                    photo(event.object.peer_id, user_id)
 
 
 '''
