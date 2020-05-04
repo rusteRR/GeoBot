@@ -25,6 +25,8 @@ COUNTER = 0  # Счётчик номера вопроса
 CORRECT = 0  # Счётчик правильных ответов в игре
 WRONG = 0  # Счётчик неверных ответов в игре
 LEVEL = '-'
+LEARNING = False
+SIGHTS = False
 
 EM_NUMBERS = {1: '1&#8419;', 2: '2&#8419;', 3: '3&#8419;', 4: '4&#8419;', 5: '5&#8419;',
               6: '6&#8419;', 7: '7&#8419;', 8: '8&#8419;', 9: '9&#8419;', 10: '&#128287;'}
@@ -38,16 +40,18 @@ def get_image(level):
     with open('cities.txt') as fi:
         cities = fi.read().split('.')
     if LEVEL == 'лёгкий':
-        cities = cities[0]
+        cities = cities[0].split('\n')
     else:
-        cities = cities[1]
+        cities = cities[1].split('\n')
+    if '' in cities:
+        del cities[cities.index('')]
     city = random.sample(cities, 1)
-    while city in used_cities:
+    while city[0] in used_cities:
         city = random.sample(cities, 1)
-    print(city)
-    used_cities.append(city)
+    print(city[0])
+    used_cities.append(city[0])
     n = Map()
-    return n.draw_map(city)
+    return n.draw_map(city[0])
 
 
 '''Функция проверяет, есть ли данный пользователь в базе данных, возваращет 
@@ -64,21 +68,70 @@ def check_register(user_id):
     return res
 
 
+def get_learning_image():
+    with open('cities.txt') as fi:
+        cities = fi.read()
+    cities = cities.replace('.', '')
+    cities = cities.split('\n')
+    city = random.sample(cities, 1)
+    while city in used_cities:
+        city = random.sample(cities, 1)
+    used_cities.append(city)
+    n = Map()
+    return n.draw_map(city), city
+
+
+def sights_photo():
+    with open('landmarks.txt') as fi:
+        sights = fi.read().split('\n')
+    sight = random.sample(sights, 1)
+    sight_name = sight[0].split(':')[-1]
+    adress = sight[0].split(':')[0]
+    while sight_name in used_cities:
+        sight = random.sample(sights, 1)
+        sight_name = sight[0].split(':')[-1]
+        adress = sight[0].split(':')[0]
+    print(sight_name)
+    used_cities.append(sight_name)
+    n = Map()
+    return n.draw_map(adress)
+
+
 '''Отправка спутникового изображения пользователю'''
 
 
 def photo(peer_id, user_id):
-    global COUNTER, CORRECT, WRONG, LEVEL
-    COUNTER += 1
-    if COUNTER > 15:
-        text = f'Правильных ответов: {CORRECT} из 15'
-        vk.messages.send(user_ids=user_id, message=text,
-                         random_id=0, keyboard=json.dumps(keyboard_in_game))
-        return
-    if COUNTER > 1:
-        msg = f'Правильных ответов &#9989;: {CORRECT}\nНеправильных ответов &#10060;: {WRONG}'
-        send_message(user_id, msg, keyboard_in_game)
-    photo = get_image(LEVEL)
+    global COUNTER, CORRECT, WRONG, LEVEL, LEARNING, SIGHTS
+    if SIGHTS:
+        COUNTER += 1
+        if COUNTER > 15:
+            text = f'Уровень пройден!\nПравильных ответов: {CORRECT} из 15\nВернитесь в главное меню'
+            vk.messages.send(user_ids=user_id, message=text,
+                             random_id=0, keyboard=json.dumps(keyboard_in_game))
+            return
+        if COUNTER > 1:
+            msg = f'Правильных ответов &#9989;: {CORRECT}\nНеправильных ответов &#10060;: {WRONG}'
+            send_message(user_id, msg, keyboard_in_game)
+        msg = f'Вопрос №{COUNTER} из {15}'
+        kb = keyboard_in_game
+        photo = sights_photo()
+    elif LEARNING:
+        photo, city = get_learning_image()
+        msg = city
+        kb = keyboard_learning
+    else:
+        COUNTER += 1
+        if COUNTER > 15:
+            text = f'Уровень пройден!\nПравильных ответов: {CORRECT} из 15\nВернитесь в главное меню'
+            vk.messages.send(user_ids=user_id, message=text,
+                             random_id=0, keyboard=json.dumps(keyboard_in_game))
+            return
+        if COUNTER > 1:
+            msg = f'Правильных ответов &#9989;: {CORRECT}\nНеправильных ответов &#10060;: {WRONG}'
+            send_message(user_id, msg, keyboard_in_game)
+        msg = f'Вопрос №{COUNTER} из {15}'
+        kb = keyboard_in_game
+        photo = get_image(LEVEL)
     res = vk.photos.getMessagesUploadServer()
     Image.open(photo).save('result.jpg')
     create_board('result.jpg')
@@ -87,8 +140,8 @@ def photo(peer_id, user_id):
     c = vk.photos.saveMessagesPhoto(
         photo=b["photo"], server=b["server"], hash=b["hash"])[0]
     res_photo = "photo{}_{}".format(c["owner_id"], c["id"])
-    vk.messages.send(user_ids=user_id, peer_id=peer_id, message=f'Вопрос №{COUNTER} из {15}',
-                     attachment=res_photo, random_id=0, keyboard=json.dumps(keyboard_in_game))
+    vk.messages.send(user_ids=user_id, peer_id=peer_id, message=msg,
+                     attachment=res_photo, random_id=0, keyboard=json.dumps(kb))
     add_questions(user_id)
     os.remove('result.jpg')
 
@@ -99,10 +152,11 @@ def send_message(us_id, msg, keyboard):
 
 
 def main():
-    global COUNTER, CORRECT, WRONG, LEVEL
+    global COUNTER, CORRECT, WRONG, LEVEL, LEARNING, SIGHTS
     TOWN = False
     RIVER = False
     WIKI = False
+    LEARNING = False
     ANSWER = 15
     WRONG = 0
     CURRENT_PROMPT = 0
@@ -131,6 +185,7 @@ def main():
                 RIVER = False
                 COUNTER = 0
                 CORRECT = 0
+                LEARNING = False
                 WIKI = False
                 WRONG = 0
                 CURRENT_PROMPT = 0
@@ -139,22 +194,33 @@ def main():
                     user_id, 'Вы успешно вышли в главное меню!', keyboard_main_menu)
 
             elif TOWN and LEVEL == '-':
-                if text == 'лёгкий' or text == 'ложный':
+                if text == 'лёгкий' or text == 'сложный':
                     LEVEL = text
                     photo(event.object.peer_id, user_id)
                 else:
                     send_message(user_id, 'Некорректный ввод!', keyboard_level)
 
-            elif text == 'города':
+            elif LEARNING and text.rsplit(maxsplit=1)[0] == 'далее':
+                photo(event.object.peer_id, user_id)
+
+            elif LEARNING and text == 'подробнее':
+                send_message(user_id, get_summary(
+                    used_cities[-1]), keyboard_learning)
+
+            elif text == 'достропримечательности':
+                SIGHTS = True
+                photo(event.object.peer_id, user_id)
+
+            elif text.rsplit(maxsplit=1)[0] == 'города':
                 send_message(user_id, 'Выберите сложность: ', keyboard_level)
                 TOWN = True
 
-            elif text == 'википедия':
+            elif text.rsplit(maxsplit=1)[0] == 'википедия':
                 WIKI = True
                 msg = 'Введите объект и мы расскажем Вам о нём! '
                 send_message(user_id, msg, keyboard_wiki)
 
-            elif text == 'топ игроков':
+            elif text.rsplit(maxsplit=1)[0] == 'топ игроков':
                 best = get_best_players()
                 msg = ''
                 i = 0
@@ -169,11 +235,23 @@ def main():
                 msg = get_summary(text)
                 send_message(user_id, msg, keyboard_wiki)
 
+            elif text.rsplit(maxsplit=1)[0] == 'режимы':
+                send_message(user_id, 'Выберите режим:', keyboard_modes)
+
+            elif text == 'обучение':
+                LEARNING = True
+                send_message(
+                    user_id, 'Добро пожаловать в режим обучения!', keyboard_learning)
+                photo(event.object.peer_id, user_id)
+
             elif text.split()[0] == 'подсказка':
-                length = len(used_cities[-1][0])
+                length = len(used_cities[-1])
                 check_update(user_id)
-                possible = len(used_cities[-1][0].replace('-', '')) // 3
-                if CURRENT_PROMPT + 1 <= possible:
+                possible = len(used_cities[-1].replace('-', '')) // 3
+                if COUNTER > 15:
+                    send_message(
+                        user_id, 'Уровень пройден!\nВернитесь в главное меню', keyboard_in_game)
+                elif CURRENT_PROMPT + 1 <= possible:
                     ok = use_prompt(user_id)
                     if ok == -1:
                         messag = '&#9940; У вас больше нет подсказок'
@@ -187,11 +265,11 @@ def main():
                         for i in range(length):
                             if i <= CURRENT_PROMPT - 2:
                                 prompt.append(
-                                    used_cities[-1][0][i].upper() + ' ')
-                            elif used_cities[-1][0][i] == '-':
+                                    used_cities[-1][i].upper() + ' ')
+                            elif used_cities[-1][i] == '-':
                                 prompt.append(' - ')
-                            elif used_cities[-1][0][i] == ' ':
-                                prompt.append('    ')
+                            elif used_cities[-1][i] == ' ':
+                                prompt.append('       ')
                             else:
                                 prompt.append('&#10134;')
                         prompt = ''.join(prompt)
@@ -202,13 +280,14 @@ def main():
                     send_message(user_id, f'{msg}\n{prompt}\n{messag}',
                                  keyboard_in_game)
 
-            elif text == 'пропустить':
+            elif text.rsplit(maxsplit=1)[0] == 'пропустить':
                 WRONG += 1
                 CURRENT_PROMPT = 0
                 photo(event.object.peer_id, user_id)
 
-            elif TOWN and (LEVEL == 'лёгкий' or LEVEL == 'сложный'):
-                if text == used_cities[-1][0].lower():
+            elif (TOWN and (LEVEL == 'лёгкий' or LEVEL == 'сложный')) or SIGHTS:
+                print(used_cities[-1])
+                if text == used_cities[-1].lower():
                     send_message(user_id, f'Верно &#9989;', keyboard_in_game)
                     CORRECT = CORRECT + 1
                     CURRENT_PROMPT = 0
@@ -275,7 +354,7 @@ keyboard_in_game = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"2\"}",
-                "label": "Пропустить"
+                "label": "Пропустить &#10145;"
             },
             "color": "primary"
         },
@@ -299,7 +378,7 @@ keyboard_main_menu = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"1\"}",
-                "label": "Города"
+                "label": "Города &#127972;"
             },
             "color": "primary"
         },
@@ -307,7 +386,7 @@ keyboard_main_menu = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"2\"}",
-                "label": "Википедия"
+                "label": "Википедия &#127759;"
             },
             "color": "primary"
         },
@@ -315,7 +394,7 @@ keyboard_main_menu = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
-                "label": "Режимы"
+                "label": "Режимы &#128681;"
             },
             "color": "primary"
         }
@@ -324,7 +403,7 @@ keyboard_main_menu = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"4\"}",
-                "label": "Топ игроков"
+                "label": "Топ игроков &#128285;"
             },
             "color": "primary"
         }
@@ -348,6 +427,78 @@ keyboard_wiki = {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
+                "label": "Выйти в меню &#128682;"
+            },
+            "color": "primary"
+        }
+        ]
+    ]
+}
+
+keyboard_modes = {
+    "one_time": False,
+    "buttons": [
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"1\"}",
+                "label": "Города &#127972;"
+            },
+            "color": "primary"
+        },
+            {
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"2\"}",
+                "label": "Достропримечательности"
+            },
+            "color": "primary"
+        },
+            {
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"3\"}",
+                "label": "Обучение"
+            },
+            "color": "primary"
+        }
+        ],
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"4\"}",
+                "label": "Выйти в меню &#128682;"
+            },
+            "color": "primary"
+        }
+        ]
+    ]
+}
+
+keyboard_learning = {
+    "one_time": False,
+    "buttons": [
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"1\"}",
+                "label": "Далее &#10145;"
+            },
+            "color": "primary"
+        },
+            {
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"3\"}",
+                "label": "Подробнее"
+            },
+            "color": "primary"
+        }
+        ],
+        [{
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"4\"}",
                 "label": "Выйти в меню &#128682;"
             },
             "color": "primary"
