@@ -49,8 +49,8 @@ def check_update(user_id):
     query = session.query(User)
     f = (User.user_id == user_id)
     for user in query.filter(f).all():
-        past_days = (datetime.datetime.now().timestamp() -
-                     user.last_update) // 86400
+        past_days = (datetime.datetime.now().timestamp()
+                     - user.last_update) // 86400
     new_prompts = past_days * 5
     if past_days > 0:
         user.last_update = user.last_update + past_days * 86400
@@ -89,3 +89,14 @@ def get_best_players():
             int((user.cor_answ / user.all_questions) * 100), user.nickname))
     best.sort()
     return best[:10]
+
+
+def stats(user_id):
+    session = db_session.create_session()
+    query = session.query(User)
+    f = (User.all_questions > 0)
+    for user in query.filter(f).all():
+        perc = (user.cor_answ / user.all_questions) * 100
+        cor = user.cor_answ
+        all_quest = user.all_questions
+    return perc, cor, all_quest

@@ -4,7 +4,7 @@ import os
 from wiki import get_summary
 from make_board import create_board
 import json
-from database import check_id, add_users, use_prompt, check_update, get_best_players, add_answers, add_questions
+from database import check_id, add_users, use_prompt, check_update, get_best_players, add_answers, add_questions, stats
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import random
 from io import BytesIO
@@ -84,6 +84,15 @@ def get_learning_image(user_id):
     return n.draw_map(city), city
 
 
+'''Возвращает пользователю личную статистику из базы данных'''
+
+
+def get_stat(user_id):
+    percent, corr, all_quest = stats(user_id)
+    text = f'Ваша личная статистика:\nПроцент верных ответов: {int(percent)}%\nПравильных ответов: {corr}\nВсего вопросов: {all_quest}'
+    return text
+
+
 def sights_photo(user_id):
     with open('landmarks.txt') as fi:
         sights = fi.read().split('\n')
@@ -158,7 +167,7 @@ def send_message(us_id, msg, keyboard):
                      random_id=random.randint(0, 2 ** 64), keyboard=json.dumps(keyboard))
 
 
-'''Основная функция программы - бот'''
+'''Основная функция программы'''
 
 
 def main():
@@ -179,7 +188,7 @@ def main():
                 nickname = response[0]['first_name'] + ' ' + \
                     response[0]['last_name'][0] + '.'
                 time = datetime.datetime.now().timestamp()
-                add_users(user_id, nickname, 100, int(time))
+                add_users(user_id, nickname, 20, int(time))
                 send_message(
                     user_id, 'Вы успешно зарегистрированы!', keyboard_main_menu)
 
@@ -188,7 +197,7 @@ def main():
             if text.rsplit(maxsplit=1)[0] == 'выйти в меню':
                 USERS[user_id] = ['', '', [], 0, 0, 0, 0]
                 send_message(
-                    user_id, 'Вы успешно вышли в главное меню!', keyboard_main_menu)
+                    user_id, 'Вы вышли в главное меню!', keyboard_main_menu)
 
             elif USERS[user_id][0] == 'town' and USERS[user_id][1] == '':
                 if text == 'лёгкий' or text == 'сложный':
@@ -240,6 +249,10 @@ def main():
                 send_message(
                     user_id, 'Добро пожаловать в режим обучения!', keyboard_learning)
                 photo(event.object.peer_id, user_id)
+
+            elif text == 'личная статистика':
+                msg = get_stat(user_id)
+                send_message(user_id, msg, keyboard_main_menu)
 
             elif text.split()[0] == 'подсказка':
                 length = len(USERS[user_id][2][-1])
@@ -294,6 +307,8 @@ def main():
                     USERS[user_id][6] = 0
                     send_message(user_id, f'Неправильно :(', keyboard_in_game)
                     photo(event.object.peer_id, user_id)
+            elif text == 'старт':
+                send_message(user_id, 'Добро пожаловать!', keyboard_main_menu)
 
 
 '''
@@ -404,7 +419,16 @@ keyboard_main_menu = {
                 "label": "Топ игроков &#128285;"
             },
             "color": "primary"
+        },
+            {
+            "action": {
+                "type": "text",
+                "payload": "{\"button\": \"5\"}",
+                "label": "Личная статистика"
+            },
+            "color": "primary"
         }
+
         ]
     ]
 }
@@ -417,14 +441,6 @@ keyboard_wiki = {
     "one_time": False,
     "buttons": [
         [{
-            "action": {
-                "type": "text",
-                "payload": "{\"button\": \"1\"}",
-                "label": "Подробнее &#128161;"
-            },
-            "color": "primary"
-        },
-            {
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
@@ -458,8 +474,9 @@ keyboard_modes = {
                 "label": "Достропримечательности"
             },
             "color": "primary"
-        },
-            {
+        }
+        ],
+        [{
             "action": {
                 "type": "text",
                 "payload": "{\"button\": \"3\"}",
